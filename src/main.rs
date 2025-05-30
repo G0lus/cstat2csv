@@ -5,8 +5,13 @@ use serde::Serialize;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
+    /// Path to the summary .html file.
+    /// Output file will be created in the same directory with the same name as the summary file.
     #[arg(short, long)]
     path: String,
+    /// Path to output file.
+    #[arg(short, long)]
+    output: String,
 }
 
 #[derive(Serialize, Debug)]
@@ -43,18 +48,18 @@ fn parse_file(file: &std::path::Path) -> Result<Vec<ReportEntry>, std::io::Error
     return Ok(vec);
 }
 
-fn get_files_list(path: &std::path::Path) -> Option<Vec<String>> {
-    let source = std::fs::read_to_string(path);
-    if source.is_err() {
-        return None;
-    }
+fn get_files_list(path: &std::path::Path) -> Result<Vec<String>, std::io::Error> {
+    let source = std::fs::read_to_string(path)?;
 
-    let html_source = scraper::html::Html::parse_document(source.unwrap().as_str());
+    let html_source = scraper::html::Html::parse_document(source.as_str());
 
     let html_table = scraper::selector::Selector::parse("table").unwrap();
     let tables = html_source.select(&html_table);
     if tables.clone().count() == 0 {
-        return None;
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Error parsing file",
+        ));
     }
     let hyperlinks = tables.into_iter().find(|element| {
         element
@@ -62,7 +67,10 @@ fn get_files_list(path: &std::path::Path) -> Option<Vec<String>> {
             .is_some_and(|id| id.contains("hyperlink-info"))
     });
     if hyperlinks.is_none() {
-        return None;
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Error parsing file",
+        ));
     }
     let link_selector = scraper::Selector::parse("a").unwrap();
     let filenames =
@@ -73,7 +81,7 @@ fn get_files_list(path: &std::path::Path) -> Option<Vec<String>> {
                 names.push(name.value().attr("href").unwrap().to_string());
                 names
             });
-    Some(filenames)
+    Ok(filenames)
 }
 
 fn main() -> Result<(), std::io::Error> {
@@ -81,29 +89,20 @@ fn main() -> Result<(), std::io::Error> {
     let path = std::path::Path::new(args.path.as_str());
     let dir = path.parent().unwrap();
 
-    let output_name =
-        format_args!("{}.csv", args.path.split_terminator('.').nth(0).unwrap()).to_string();
+    let mut out_writer = csv::Writer::from_path(args.output)?;
 
-    let mut out_writer = csv::Writer::from_path(output_name)?;
+    let files = get_files_list(path)?;
 
-    let files = get_files_list(path);
-    if files.is_none() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "Error parsing file",
-        ));
-    }
-
-    for file in files.unwrap() {
+    for file in files {
         let path = format_args!("{}/{}", dir.to_str().unwrap(), file.as_str()).to_string();
         let status = parse_file(std::path::Path::new(path.as_str()));
         if status.is_ok() {
             for entry in status.unwrap() {
                 out_writer.serialize(entry)?;
             }
-            out_writer.flush()?;
         }
     }
+    out_writer.flush()?;
     Ok(())
 }
 
@@ -111,16 +110,16 @@ fn main() -> Result<(), std::io::Error> {
 fn test_parsing() -> Result<(), std::io::Error> {
     let source = std::path::Path::new("Report/BLLm_bootMain.c.html");
 
-    let _ = parse_file(source);
-    Ok(())
+    parse_file(source)?;
+    return Ok(());
 }
 
 #[test]
 fn test_getting_file_list() -> Result<(), std::io::Error> {
-    let source = std::path::Path::new("Report/Boot.html");
+    let source = std::path::Path::new("Report/Boot/Boot.html");
 
     let files = get_files_list(source);
-    if files.is_some_and(|f| f.len() > 0) {
+    if files.is_ok_and(|f| f.len() > 0) {
         return Ok(());
     } else {
         return Err(std::io::Error::new(
