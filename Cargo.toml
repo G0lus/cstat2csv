@@ -1,6 +1,6 @@
 [package]
-name = "html-project-converter"
-version = "0.1.0"
+name = "cstat2csv"
+version = "1.0.2"
 edition = "2024"
 
 [dependencies]

@@ -18,8 +18,9 @@ struct Args {
 struct ReportEntry {
     file: String,
     line: usize,
-    message: String,
+    tag: String,
     severity: String,
+    message: String,
 }
 
 fn parse_file(file: &std::path::Path) -> Result<Vec<ReportEntry>, std::io::Error> {
@@ -30,21 +31,28 @@ fn parse_file(file: &std::path::Path) -> Result<Vec<ReportEntry>, std::io::Error
     let rows_data_select = scraper::Selector::parse("td").unwrap();
     let table = html.select(&table_select).next().unwrap();
 
+    let rows = table.select(&rows_select).skip(2);
+    println!(
+        "Parsing {}: {} messages",
+        file.to_str().unwrap(),
+        rows.clone().into_iter().count(),
+    );
+
     let mut vec = Vec::<ReportEntry>::new();
-    for row in table.select(&rows_select) {
+    for row in rows {
         let data = row.select(&rows_data_select);
         let elems = data.map(|elem| elem.inner_html()).collect::<Vec<String>>();
         if elems.len() > 4 {
             let entry = ReportEntry {
                 file: elems.iter().nth(0).unwrap().to_string(),
                 line: elems.iter().nth(1).unwrap().parse::<usize>().unwrap(),
+                tag: elems.iter().nth(2).unwrap().to_string(),
                 severity: elems.iter().nth(3).unwrap().to_string(),
-                message: elems.iter().nth(2).unwrap().to_string(),
+                message: elems.iter().nth(4).unwrap().to_string(),
             };
             vec.push(entry);
         }
     }
-
     return Ok(vec);
 }
 
@@ -96,11 +104,12 @@ fn main() -> Result<(), std::io::Error> {
     for file in files {
         let path = format_args!("{}/{}", dir.to_str().unwrap(), file.as_str()).to_string();
         let status = parse_file(std::path::Path::new(path.as_str()));
-        if status.is_ok() {
-            for entry in status.unwrap() {
-                out_writer.serialize(entry)?;
+        let _ = status.as_ref().and_then(|report| {
+            for entry in report {
+                let _ = out_writer.serialize(entry);
             }
-        }
+            Ok(())
+        });
     }
     out_writer.flush()?;
     Ok(())
@@ -108,7 +117,7 @@ fn main() -> Result<(), std::io::Error> {
 
 #[test]
 fn test_parsing() -> Result<(), std::io::Error> {
-    let source = std::path::Path::new("Report/BLLm_bootMain.c.html");
+    let source = std::path::Path::new("Report/Boot/BLLm_bootMain.c.html");
 
     parse_file(source)?;
     return Ok(());
